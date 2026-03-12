@@ -1,3 +1,4 @@
+from src.predictor import predict_job
 import streamlit as st
 import time
 
@@ -121,8 +122,10 @@ if st.session_state.show_input:
             st.success("Analysis Complete")
 
             # Example results (until backend ready)
-            real_percent = 90
-            fake_percent = 10
+            result = predict_job(job_text)
+
+            real_percent = result["real_probability"]
+            fake_percent = result["fake_probability"]
 
             st.write("")
             st.markdown("---")
@@ -138,5 +141,7 @@ if st.session_state.show_input:
 
             if real_percent > fake_percent:
                 st.success("Result: This job posting appears REAL")
-            else:
+            elif fake_percent > real_percent:
                 st.error("Result: This job posting appears FAKE")
+            else:
+                st.warning("Result: Uncertain prediction")
