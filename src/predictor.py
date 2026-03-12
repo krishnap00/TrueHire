@@ -1,12 +1,27 @@
 def predict_job(text):
-    """
-    Temporary prediction logic.
-    This will later be replaced with the ML model.
-    """
 
     text = text.lower()
 
-    if "urgent" in text or "limited offer" in text or "quick money" in text:
-        return "Fake Job Posting"
+    # Temporary rule logic (until ML model added)
+    fake_keywords = ["urgent", "limited offer", "quick money"]
+
+    fake_score = 0
+
+    for word in fake_keywords:
+        if word in text:
+            fake_score += 1
+
+    # Convert score to probabilities
+    fake_probability = min(fake_score * 0.3, 0.9)
+    real_probability = 1 - fake_probability
+
+    if fake_probability > real_probability:
+        prediction = "Fake"
     else:
-        return "Genuine Job Posting"
+        prediction = "Real"
+
+    return {
+        "prediction": prediction,
+        "fake_probability": round(fake_probability * 100, 2),
+        "real_probability": round(real_probability * 100, 2)
+    }
