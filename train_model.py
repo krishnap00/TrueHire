@@ -10,17 +10,18 @@ import pandas as pd
 import numpy as np
 import string
 import nltk
+from nltk.stem import WordNetLemmatizer
 import pickle
 
 from nltk.corpus import stopwords
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (accuracy_score, classification_report,
                              confusion_matrix)
 from imblearn.over_sampling import SMOTE
 
 nltk.download('stopwords')
+nltk.download('wordnet')
 
 # ------------------------------------
 # 2. Load Dataset
@@ -46,20 +47,44 @@ df["text"] = (
     df["employment_type"] + " " +
     df["required_experience"]
 )
+# 🔥 NEW FEATURES
+df["text_length"] = df["text"].apply(len)
+df["num_exclamations"] = df["text"].apply(lambda x: x.count("!"))
 
-X = df["text"]
+# Keyword-based features
+money_keywords = ["salary", "$", "earn", "income", "paid"]
+urgent_keywords = ["urgent", "immediate", "limited", "hurry"]
+
+df["has_money_words"] = df["text"].apply(
+    lambda x: int(any(word in x.lower() for word in money_keywords))
+)
+
+df["has_urgent_words"] = df["text"].apply(
+    lambda x: int(any(word in x.lower() for word in urgent_keywords))
+)
+
+X_text = df["text"]
+
+# Additional numeric features
+X_extra = df[[
+    "text_length",
+    "num_exclamations",
+    "has_money_words",
+    "has_urgent_words"
+]]
 y = df["fraudulent"]
 
 # ------------------------------------
 # 4. Text Preprocessing
 # ------------------------------------
 stop_words = set(stopwords.words("english"))
+lemmatizer = WordNetLemmatizer()
 
 def preprocess(text):
     text = text.lower()
     text = text.translate(str.maketrans('', '', string.punctuation))
     words = text.split()
-    words = [w for w in words if w not in stop_words]
+    words = [lemmatizer.lemmatize(w) for w in words if w not in stop_words]
     return " ".join(words)
 
 print("\nPreprocessing text... (this may take a minute)")
@@ -69,15 +94,25 @@ print("Preprocessing done!")
 # ------------------------------------
 # 5. Convert Text → Numbers (TF-IDF)
 # ------------------------------------
-vectorizer = TfidfVectorizer(max_features=5000)
-X_vector = vectorizer.fit_transform(X)
+vectorizer = TfidfVectorizer(
+    max_features=10000,
+    ngram_range=(1,2),
+    stop_words='english',
+    min_df=5,
+    max_df=0.9
+)
+from scipy.sparse import hstack
+
+X_vector = vectorizer.fit_transform(X_text)
+
+# Combine TF-IDF + extra features
+X_final = hstack((X_vector, X_extra))
 
 # ------------------------------------
 # 6. Train Test Split
 # ------------------------------------
 X_train, X_test, y_train, y_test = train_test_split(
-    X_vector, y, test_size=0.2, random_state=42, stratify=y
-    # ✅ FIX: stratify=y ensures both splits have same fake/real ratio
+    X_final, y, test_size=0.2, random_state=42, stratify=y
 )
 
 print("\nBefore SMOTE:")
@@ -96,15 +131,15 @@ print("  Real jobs in train:", sum(y_train == 0))
 print("  Fake jobs in train:", sum(y_train == 1))
 
 # ------------------------------------
-# 8. Train Random Forest Model
+# 8. Train Logistic Regression Model  ✅ UPDATED
 # ------------------------------------
-print("\nTraining Random Forest model...")
-model = RandomForestClassifier(
-    n_estimators=200,        # more trees = better learning
-    max_depth=None,          # let trees grow fully
-    min_samples_leaf=1,
-    random_state=42,
-    class_weight={0: 1, 1: 10}  # tell model: missing a fake is 10x worse
+from sklearn.linear_model import LogisticRegression
+
+print("\nTraining Logistic Regression model...")
+
+model = LogisticRegression(
+    max_iter=1000,
+    class_weight='balanced'   # handles imbalance better
 )
 
 model.fit(X_train, y_train)
@@ -132,6 +167,28 @@ print(f"  True Fake  (correct): {cm[1][1]}  ← want this HIGH")
 # ------------------------------------
 # 10. ✅ FIX: Predict with probability threshold
 # ------------------------------------
+# ------------------------------------
+# 🔥 NEW: Domain Mismatch Detection
+# ------------------------------------
+def detect_mismatch(text):
+    text = text.lower()
+    
+    tech_roles = [
+        "software engineer", "developer", "data scientist",
+        "backend engineer", "frontend developer"
+    ]
+    
+    non_tech_degrees = [
+        "bsc maths", "history", "arts", "biology",
+        "commerce", "ba", "bcom"
+    ]
+    
+    role_flag = any(role in text for role in tech_roles)
+    degree_flag = any(deg in text for deg in non_tech_degrees)
+    
+    if role_flag and degree_flag:
+        return 1  # mismatch detected
+    return 0
 def predict_job(text, threshold=0.35):
     # Scam keyword boost
     scam_keywords = [
@@ -146,9 +203,26 @@ def predict_job(text, threshold=0.35):
     
     cleaned = preprocess(text)
     vector = vectorizer.transform([cleaned])
+
+    # Create same extra features for input
+    text_length = len(text)
+    num_exclamations = text.count("!")
+
+    has_money_words = int(any(word in text.lower() for word in ["salary", "$", "earn", "income", "paid"]))
+    has_urgent_words = int(any(word in text.lower() for word in ["urgent", "immediate", "limited", "hurry"]))
+
+    import numpy as np
+    extra_features = np.array([[text_length, num_exclamations, has_money_words, has_urgent_words]])
+
+    from scipy.sparse import hstack
+    vector = hstack((vector, extra_features))
     prob_fake = model.predict_proba(vector)[0][1]
-    
-    # Boost probability if scam keywords found
+    # 🔥 Apply domain mismatch logic
+    mismatch = detect_mismatch(text)
+
+    if mismatch:
+        prob_fake = min(prob_fake + 0.15, 1.0)
+      # Boost probability if scam keywords found
     if keyword_hits >= 2:
         prob_fake = min(prob_fake + 0.2, 1.0)  # boost by 20%
     elif keyword_hits == 1:
