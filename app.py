@@ -7,4 +7,6 @@ job_text = st.text_area("Paste Job Description")
 
 if st.button("Analyze"):
     result = predict_job(job_text)
-    st.success(f"Prediction: {result}")
+    st.metric("Real Probability", f"{result['real_probability']}%")
+    st.metric("Fake Probability", f"{result['fake_probability']}%")
+    st.write("Reasons:", ", ".join(result['reasons']) if result['reasons'] else "None")
