@@ -6,6 +6,9 @@
 # ------------------------------------
 # 1. Import Libraries
 # ------------------------------------
+from pydoc import text
+from xml.parsers.expat import model
+
 import pandas as pd
 import numpy as np
 import string
@@ -13,6 +16,7 @@ import nltk
 from nltk.stem import WordNetLemmatizer
 import pickle
 
+# from sentence_transformers import SentenceTransformer
 from nltk.corpus import stopwords
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -88,32 +92,56 @@ def preprocess(text):
     return " ".join(words)
 
 print("\nPreprocessing text... (this may take a minute)")
-X = X.apply(preprocess)
+X_text = X_text.apply(preprocess)
 print("Preprocessing done!")
+# print("\nLoading embedding model...")
+# embedder = SentenceTransformer('all-MiniLM-L6-v2')
+# print("Embedding model loaded!")
 
 # ------------------------------------
-# 5. Convert Text → Numbers (TF-IDF)
+# 5. Convert Text → Numbers (HYBRID)
 # ------------------------------------
-vectorizer = TfidfVectorizer(
+
+# 🔵 TF-IDF (Model 1 - Fast)
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+tfidf_vectorizer = TfidfVectorizer(
     max_features=10000,
     ngram_range=(1,2),
     stop_words='english',
     min_df=5,
     max_df=0.9
 )
+
+X_tfidf = tfidf_vectorizer.fit_transform(X_text)
+
+# 🟣 Embeddings (Model 2 - Smart)
+#print("\nGenerating embeddings...")
+#X_embed = embedder.encode(
+#    X_text.tolist(),
+#    batch_size=64,
+#    show_progress_bar=True
+#)
+#print("Embeddings generated!")
+
+# Combine with extra features
+import numpy as np
 from scipy.sparse import hstack
 
-X_vector = vectorizer.fit_transform(X_text)
-
-# Combine TF-IDF + extra features
-X_final = hstack((X_vector, X_extra))
-
+X_tfidf_final = hstack((X_tfidf, X_extra))
+#X_embed_final = np.hstack((X_embed, X_extra.values))
 # ------------------------------------
 # 6. Train Test Split
 # ------------------------------------
-X_train, X_test, y_train, y_test = train_test_split(
-    X_final, y, test_size=0.2, random_state=42, stratify=y
+# Split TF-IDF
+X_train_tfidf, X_test_tfidf, y_train, y_test = train_test_split(
+    X_tfidf_final, y, test_size=0.2, random_state=42, stratify=y
 )
+
+# Split Embeddings (same split)
+#X_train_embed, X_test_embed, _, _ = train_test_split(
+#    X_embed_final, y, test_size=0.2, random_state=42, stratify=y
+#)
 
 print("\nBefore SMOTE:")
 print("  Real jobs in train:", sum(y_train == 0))
@@ -122,11 +150,11 @@ print("  Fake jobs in train:", sum(y_train == 1))
 # ------------------------------------
 # 7. ✅ FIX: Apply SMOTE to balance classes
 # ------------------------------------
-print("\nApplying SMOTE to balance the dataset...")
-smote = SMOTE(random_state=42)
-X_train, y_train = smote.fit_resample(X_train, y_train)
+# print("\nApplying SMOTE to balance the dataset...")
+# smote = SMOTE(random_state=42)
+# X_train, y_train = smote.fit_resample(X_train, y_train)
 
-print("After SMOTE:")
+# print("After SMOTE:")
 print("  Real jobs in train:", sum(y_train == 0))
 print("  Fake jobs in train:", sum(y_train == 1))
 
@@ -137,18 +165,20 @@ from sklearn.linear_model import LogisticRegression
 
 print("\nTraining Logistic Regression model...")
 
-model = LogisticRegression(
-    max_iter=1000,
-    class_weight='balanced'   # handles imbalance better
-)
+print("\nTraining TF-IDF model...")
+tfidf_model = LogisticRegression(max_iter=2000, class_weight='balanced')
+tfidf_model.fit(X_train_tfidf, y_train)
 
-model.fit(X_train, y_train)
-print("Training complete!")
+#print("Training Embedding model...")
+#embed_model = LogisticRegression(max_iter=1000, class_weight='balanced')
+#embed_model.fit(X_train_embed, y_train)
+
+print(" TF-IDF model trained!")
 
 # ------------------------------------
 # 9. Model Evaluation
 # ------------------------------------
-y_pred = model.predict(X_test)
+y_pred = tfidf_model.predict(X_test_tfidf)
 
 print("\n" + "="*50)
 print("MODEL EVALUATION RESULTS")
@@ -189,7 +219,47 @@ def detect_mismatch(text):
     if role_flag and degree_flag:
         return 1  # mismatch detected
     return 0
-def predict_job(text, threshold=0.35):
+def detect_fake_company(text):
+    suspicious_words = [
+        "unknown company", "startup soon", "new company",
+        "confidential company", "growing company"
+    ]
+    
+    return int(any(word in text.lower() for word in suspicious_words))
+import re
+
+def detect_suspicious_email(text):
+    emails = re.findall(r'\S+@\S+', text)
+    
+    suspicious_domains = ["gmail.com", "yahoo.com", "outlook.com"]
+    
+    for email in emails:
+        if any(domain in email for domain in suspicious_domains):
+            return 1
+    return 0
+def detect_high_salary(text):
+    import re
+    salaries = re.findall(r'\$?\d+', text)
+    
+    for sal in salaries:
+        try:
+            if int(sal.replace("$", "")) > 10000:
+                return 1
+        except:
+            continue
+    return 0
+def detect_weird_format(text):
+    if text.count("!!!") > 0:
+        return 1
+    if text.isupper():
+        return 1
+    return 0
+def predict_job(text, threshold=0.65):
+    fake_company = detect_fake_company(text)
+    suspicious_email = detect_suspicious_email(text)
+    high_salary = detect_high_salary(text)
+    weird_format = detect_weird_format(text)
+
     # Scam keyword boost
     scam_keywords = [
         "registration fee", "pay fee", "processing fee",
@@ -202,8 +272,12 @@ def predict_job(text, threshold=0.35):
     keyword_hits = sum(1 for kw in scam_keywords if kw in text_lower)
     
     cleaned = preprocess(text)
-    vector = vectorizer.transform([cleaned])
+    # TF-IDF vector
+    tfidf_vec = tfidf_vectorizer.transform([cleaned])
 
+    # Embedding vector
+    #embed_vec = np.array(embedder.encode([cleaned]))
+    
     # Create same extra features for input
     text_length = len(text)
     num_exclamations = text.count("!")
@@ -213,20 +287,41 @@ def predict_job(text, threshold=0.35):
 
     import numpy as np
     extra_features = np.array([[text_length, num_exclamations, has_money_words, has_urgent_words]])
-
     from scipy.sparse import hstack
-    vector = hstack((vector, extra_features))
-    prob_fake = model.predict_proba(vector)[0][1]
+
+    # Combine TF-IDF with extra features
+    tfidf_vec = hstack((tfidf_vec, extra_features))
+
+    # Combine embeddings with extra features
+    #embed_vec = np.hstack((embed_vec, extra_features))
+    #tfidf_prob = tfidf_model.predict_proba(tfidf_vec)[0][1]
+    #embed_prob = embed_model.predict_proba(embed_vec)[0][1]
+
+    #prob_fake = 0.7 * tfidf_prob + 0.3 * embed_prob
+    tfidf_prob = tfidf_model.predict_proba(tfidf_vec)[0][1]
+    prob_fake = tfidf_prob
+
+    if fake_company:
+        prob_fake = min(prob_fake + 0.05, 1.0)
+
+    if suspicious_email:
+        prob_fake = min(prob_fake + 0.07, 1.0)
+
+    if high_salary:
+        prob_fake = min(prob_fake + 0.08, 1.0)
+
+    if weird_format:
+        prob_fake = min(prob_fake + 0.05, 1.0)
     # 🔥 Apply domain mismatch logic
     mismatch = detect_mismatch(text)
 
     if mismatch:
-        prob_fake = min(prob_fake + 0.15, 1.0)
+        prob_fake = min(prob_fake + 0.08, 1.0)
       # Boost probability if scam keywords found
     if keyword_hits >= 2:
-        prob_fake = min(prob_fake + 0.2, 1.0)  # boost by 20%
+        prob_fake = min(prob_fake + 0.15, 1.0)
     elif keyword_hits == 1:
-        prob_fake = min(prob_fake + 0.1, 1.0)  # boost by 10%
+        prob_fake = min(prob_fake + 0.05, 1.0)
     
     print(f"\n--- Prediction Result ---")
     print(f"Fake Probability : {prob_fake:.2%}")
@@ -234,6 +329,8 @@ def predict_job(text, threshold=0.35):
     
     if prob_fake > threshold:
         print(f"⚠️  FAKE Job Post Detected!")
+    elif prob_fake > 0.5:
+        print("⚠️ Suspicious Job Post (Review Recommended)")
     else:
         print(f"✅ Likely Real Job Post")
     
@@ -254,7 +351,7 @@ Click the link and pay registration fee to start today!
 Guaranteed daily income. No skills required.
 """
 print("\nTest 1 - Obvious Scam:")
-predict_job(test1, threshold=0.35)
+predict_job(test1)
 
 # Test 2 - Subtle scam impersonating real company
 test2 = """
@@ -264,7 +361,7 @@ Send your personal details and pay $50 processing fee.
 Work from home. Immediate joining. Urgent hiring.
 """
 print("\nTest 2 - Subtle Scam (fake company):")
-predict_job(test2, threshold=0.35)
+predict_job(test2)
 
 # Test 3 - Real-looking legitimate job
 test3 = """
@@ -274,7 +371,7 @@ Competitive salary and benefits. Apply through official company website.
 Strong problem solving skills. Experience with cloud platforms a plus.
 """
 print("\nTest 3 - Legitimate Job Post:")
-predict_job(test3, threshold=0.35)
+predict_job(test3)
 
 # Test 4 - Another real job
 test4 = """
@@ -284,15 +381,17 @@ MBA or relevant degree. 5 day work week.
 Health insurance provided. PF and gratuity as per norms.
 """
 print("\nTest 4 - Legitimate Job Post 2:")
-predict_job(test4, threshold=0.35)
+predict_job(test4)
 
 # ------------------------------------
 # 12. Save Model & Vectorizer
 # ------------------------------------
-pickle.dump(model, open("rf_fake_job_model.pkl", "wb"))
-pickle.dump(vectorizer, open("rf_vectorizer.pkl", "wb"))
+#pickle.dump(tfidf_model, open("tfidf_model.pkl", "wb"))
+#pickle.dump(embed_model, open("embed_model.pkl", "wb"))
+pickle.dump(tfidf_model, open("tfidf_model.pkl", "wb"))
+pickle.dump(tfidf_vectorizer, open("tfidf_vectorizer.pkl", "wb"))
 
 print("\n" + "="*50)
 print("✅ Model and Vectorizer saved successfully!")
-print("   Files: rf_fake_job_model.pkl, rf_vectorizer.pkl")
+print("   Files: tfidf_model.pkl, tfidf_vectorizer.pkl")
 print("="*50)
