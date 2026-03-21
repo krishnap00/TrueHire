@@ -1,3 +1,7 @@
+import sys
+import os
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from src.predictor import predict_job
 import streamlit as st
 import time
@@ -139,9 +143,37 @@ if st.session_state.show_input:
             with r2:
                 st.metric("Fake Job Probability", f"{fake_percent}%")
 
-            if real_percent > fake_percent:
-                st.success("Result: This job posting appears REAL")
-            elif fake_percent > real_percent:
-                st.error("Result: This job posting appears FAKE")
+            if fake_percent < 40:
+                st.success("✅ Result: This job posting appears REAL")
+
+            elif 40 <= fake_percent <= 65:
+                st.warning("⚠️ Result: This job posting looks SUSPICIOUS")
+
             else:
-                st.warning("Result: Uncertain prediction")
+                st.error("❌ Result: This job posting is likely FAKE")
+            # 🔥 ADD THIS BELOW (visual highlight)
+            if fake_percent > 65:
+                st.markdown(
+                    "<h3 style='color:red; text-align:center;'>⚠️ High Risk Job Detected</h3>",
+                    unsafe_allow_html=True
+                )
+
+            elif 40 <= fake_percent <= 65:
+                st.markdown(
+                    "<h3 style='color:orange; text-align:center;'>⚠️ Suspicious Job</h3>",
+                    unsafe_allow_html=True
+                )
+
+            else:
+                st.markdown(
+                    "<h3 style='color:green; text-align:center;'>✅ Looks Safe</h3>",
+                    unsafe_allow_html=True
+                )
+            st.markdown("---")
+            st.subheader("Why this result?")
+
+            if result["reasons"]:
+                for r in result["reasons"]:
+                    st.write("•", r)
+            else:
+                st.write("No major risk signals detected.")
