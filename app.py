@@ -1,3 +1,4 @@
+from model_utils import predict_job
 import streamlit as st
 import time
 
@@ -186,12 +187,10 @@ if st.session_state.show_input:
                 time.sleep(0.015)
                 progress.progress(i + 1)
 
-            fake_keywords = ["no experience", "quick money", "earn fast", "registration fee", "work from home"]
-            fake_score = sum(word in job_text.lower() for word in fake_keywords)
+            # 🔥 CALL YOUR ML MODEL
+            real, fake, label = predict_job(job_text)
 
-            fake = min(20 + fake_score * 15, 90)
-            real = 100 - fake
-
+            # ---------------- RESULT ---------------- #
             st.markdown(f"""
             <div style="margin-top:30px; font-size:1.3rem;">
                 <b>Real: {real}%</b> &nbsp;&nbsp;&nbsp;&nbsp;
@@ -199,16 +198,15 @@ if st.session_state.show_input:
             </div>
             """, unsafe_allow_html=True)
 
-            if real > fake:
-                st.markdown("<h1 style='color:white;'>REAL JOB</h1>", unsafe_allow_html=True)
-            else:
-                st.markdown("<h1 style='color:white;'>FAKE JOB</h1>", unsafe_allow_html=True)
+            st.markdown(f"<h1 style='color:white;'>{label}</h1>", unsafe_allow_html=True)
 
-            reason = "Looks safe based on description."
-            for word in fake_keywords:
-                if word in job_text.lower():
-                    reason = f"Suspicious phrase detected: '{word}'"
-                    break
+            # Simple reason logic (optional)
+            if fake > 70:
+                reason = "High probability of scam patterns detected."
+            elif fake > 40:
+                reason = "Some suspicious patterns found."
+            else:
+                reason = "Looks safe based on analysis."
 
             st.markdown(f"""
             <div style="font-size:1.2rem; margin-top:10px;">

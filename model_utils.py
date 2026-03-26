@@ -73,7 +73,17 @@ def predict_job(text):
     tfidf_vec = hstack((tfidf_vec, extra))
 
     prob_fake = tfidf_model.predict_proba(tfidf_vec)[0][1]
+    # 🔥 Scam keyword detection
+    scam_keywords = [
+        "registration fee", "pay fee", "processing fee",
+        "earn from home", "no experience needed",
+        "guaranteed income", "limited slots",
+        "work from home earn", "daily income",
+        "whatsapp", "send personal details", "wire transfer"
+    ]
 
+    text_lower = text.lower()
+    keyword_hits = sum(1 for kw in scam_keywords if kw in text_lower)
     # Boost logic
     if detect_fake_company(text):
         prob_fake += 0.05
@@ -85,12 +95,15 @@ def predict_job(text):
         prob_fake += 0.05
     if detect_mismatch(text):
         prob_fake += 0.08
-
+    if keyword_hits >= 2:
+        prob_fake = min(prob_fake + 0.1, 1.0)
+    elif keyword_hits == 1:
+        prob_fake = min(prob_fake + 0.05, 1.0)
     prob_fake = min(prob_fake, 1.0)
 
     fake = prob_fake * 100
     real = 100 - fake
 
-    label = "FAKE JOB" if fake > 50 else "REAL JOB"
+    label = "FAKE JOB" if prob_fake > 0.5 else "REAL JOB"
 
     return real, fake, label

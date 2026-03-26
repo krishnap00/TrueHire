@@ -384,10 +384,7 @@ predict_job(test3)
 
 # Test 4 - Another real job
 test4 = """
-Data Analyst position at Infosys, Bangalore.
-2 years experience in SQL and Excel required.
-MBA or relevant degree. 5 day work week.
-Health insurance provided. PF and gratuity as per norms.
+mechanical engineer required. high salary. qualification: 10th pass
 """
 print("\nTest 4 - Legitimate Job Post 2:")
 predict_job(test4)
