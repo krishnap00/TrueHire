@@ -159,22 +159,31 @@ print("  Real jobs in train:", sum(y_train == 0))
 print("  Fake jobs in train:", sum(y_train == 1))
 
 # ------------------------------------
-# 8. Train Logistic Regression Model  ✅ UPDATED
+# 8. Train XGBoost Model  ✅ UPDATED
 # ------------------------------------
-from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier
 
-print("\nTraining Logistic Regression model...")
+print("\nTraining XGBoost model...")
 
-print("\nTraining TF-IDF model...")
-tfidf_model = LogisticRegression(max_iter=2000, class_weight='balanced')
+# Calculate scale_pos_weight to handle class imbalance
+# (replaces class_weight='balanced' from LogisticRegression)
+neg = sum(y_train == 0)
+pos = sum(y_train == 1)
+scale = neg / pos  # e.g. ~14 if dataset is heavily imbalanced
+
+tfidf_model = XGBClassifier(
+    n_estimators=300,
+    max_depth=6,
+    learning_rate=0.1,
+    scale_pos_weight=scale,   # handles class imbalance
+    use_label_encoder=False,
+    eval_metric='logloss',
+    random_state=42,
+    tree_method='hist'        # faster training
+)
+
 tfidf_model.fit(X_train_tfidf, y_train)
-
-#print("Training Embedding model...")
-#embed_model = LogisticRegression(max_iter=1000, class_weight='balanced')
-#embed_model.fit(X_train_embed, y_train)
-
-print(" TF-IDF model trained!")
-
+print("XGBoost model trained!")
 # ------------------------------------
 # 9. Model Evaluation
 # ------------------------------------
@@ -254,7 +263,7 @@ def detect_weird_format(text):
     if text.isupper():
         return 1
     return 0
-def predict_job(text, threshold=0.65):
+def predict_job(text, threshold=0.45):
     fake_company = detect_fake_company(text)
     suspicious_email = detect_suspicious_email(text)
     high_salary = detect_high_salary(text)
